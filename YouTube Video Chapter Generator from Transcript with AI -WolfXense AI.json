@@ -1,0 +1,348 @@
+{
+  "name": "YouTube Video Chapter Generator from Transcript with AI -WolfXense AI",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "options": {
+          "responseMode": "responseNodes"
+        }
+      },
+      "id": "060ed595-54b6-4394-8e50-f6c2bc6e5ef6",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        5168,
+        1744
+      ],
+      "webhookId": "15cb0a04-a04b-4ac1-8ee1-e4bb0bf9c4ff"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "youtubeUrl",
+              "value": "={{ $json.chatInput }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "068133b2-929a-4cc8-94f0-9e686d48aec4",
+      "name": "Workflow Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5392,
+        1744
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract Video ID from YouTube URL\nconst items = $input.all();\n\nfor (const item of items) {\n  const url = item.json.youtubeUrl || item.json.url || '';\n  \n  let videoId = null;\n  \n  // Pattern 1: youtube.com/watch?v=VIDEO_ID\n  let match = url.match(/[?&]v=([^&]+)/);\n  if (match) {\n    videoId = match[1];\n  }\n  \n  // Pattern 2: youtu.be/VIDEO_ID\n  if (!videoId) {\n    match = url.match(/youtu\\.be\\/([^?&]+)/);\n    if (match) {\n      videoId = match[1];\n    }\n  }\n  \n  // Pattern 3: youtube.com/embed/VIDEO_ID\n  if (!videoId) {\n    match = url.match(/\\/embed\\/([^?&]+)/);\n    if (match) {\n      videoId = match[1];\n    }\n  }\n  \n  item.json.videoId = videoId;\n}\n\nreturn items;"
+      },
+      "id": "db8d4aa5-f02e-4e9d-8b37-94cd78d6b44a",
+      "name": "Extract Video ID from URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5616,
+        1744
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Video Title: {{ $json.videoTitle }}\n\nTranscript:\n{{ $json.transcript }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are an expert video content analyzer specializing in identifying topic shifts and creating YouTube chapter timestamps.\n\nYour task is to:\n1. Analyze the provided video transcript carefully\n2. Identify major topic shifts and key sections\n3. Generate chapter timestamps in the format HH:MM:SS or MM:SS\n4. Create descriptive chapter titles (concise but informative)\n5. Ensure chapters are logically organized and cover the entire video\n6. Return the structured output with timestamps and chapter titles\n\nGuidelines:\n- Chapters should be at least 10 seconds apart\n- First chapter should start at 00:00\n- Chapter titles should be clear and descriptive\n- Aim for 5-15 chapters depending on video length and content\n\nIMPORTANT SYSTEM INSTRUCTION:\n- You must output RAW JSON only.\n- Do NOT wrap the output in markdown code blocks (e.g., do not use ```json or ```).\n- Do NOT include any conversational text before or after the JSON.\n- Start your response immediately with [ or {."
+        }
+      },
+      "id": "912ff2b1-16d5-4bbb-b6a1-430565905f2b",
+      "name": "Chapter Generator Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        6288,
+        1744
+      ]
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n\t\"type\": \"object\",\n\t\"properties\": {\n\t\t\"chapters\": {\n\t\t\t\"type\": \"array\",\n\t\t\t\"items\": {\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"properties\": {\n\t\t\t\t\t\"timestamp\": {\n\t\t\t\t\t\t\"type\": \"string\",\n\t\t\t\t\t\t\"description\": \"Chapter timestamp in HH:MM:SS or MM:SS format\"\n\t\t\t\t\t},\n\t\t\t\t\t\"title\": {\n\t\t\t\t\t\t\"type\": \"string\",\n\t\t\t\t\t\t\"description\": \"Descriptive chapter title\"\n\t\t\t\t\t}\n\t\t\t\t},\n\t\t\t\t\"required\": [\"timestamp\", \"title\"]\n\t\t\t}\n\t\t}\n\t},\n\t\"required\": [\"chapters\"]\n}"
+      },
+      "id": "9b38d209-b890-4ab1-9b37-05ed11fa1606",
+      "name": "Structured Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        6432,
+        2096
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the chapters from the AI agent output\nconst chapters = $input.first().json.output.chapters;\n\n// Get the existing video description from previous node\nconst existingDescription = $('Get Video Details').first().json.snippet?.description || '';\n\n// Get the video ID from previous nodes\nconst videoId = $('Extract Video ID from URL').first().json.videoId;\n\n// Format chapters into YouTube timestamp format\nconst formattedChapters = chapters.map(chapter => {\n  return `${chapter.timestamp} - ${chapter.title}`;\n}).join('\\n');\n\n// Combine existing description with new chapters\nconst updatedDescription = existingDescription + '\\n\\n--- Chapters ---\\n' + formattedChapters;\n\n// Return the updated description with additional fields\nreturn [{\n  json: {\n    updatedDescription: updatedDescription,\n    chapters: chapters,\n    chapterCount: chapters.length,\n    chapterList: formattedChapters,\n    videoId: videoId\n  }\n}];"
+      },
+      "id": "ff761fac-54b0-4a92-b98e-7572c627f852",
+      "name": "Format Chapter List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6640,
+        1744
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "video",
+        "operation": "update",
+        "videoId": "={{ $('Extract Video ID from URL').item.json.videoId }}",
+        "title": "={{ $json.videoTitle || 'Video' }}",
+        "regionCode": "US",
+        "categoryId": "={{ 27 }}",
+        "updateFields": {
+          "description": "={{ $json.updatedDescription }}"
+        }
+      },
+      "id": "8b821896-461b-47c9-b33c-9cb9e2ceecbc",
+      "name": "Update Video Description",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        6864,
+        1744
+      ],
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "ayu6uwkq7pBXw1HT",
+          "name": "YouTube account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "message": "=✅ Video chapters have been successfully generated and added to your video description!\n\nGenerated {{ $('Format Chapter List').item.json.chapterCount }} chapters:\n\n{{ $('Format Chapter List').item.json.chapterList }}",
+        "options": {}
+      },
+      "id": "30821094-7ccd-4ee3-ad4d-990c38ba1bc8",
+      "name": "Respond to Chat",
+      "type": "@n8n/n8n-nodes-langchain.chat",
+      "typeVersion": 1,
+      "position": [
+        7088,
+        1744
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        6288,
+        1984
+      ],
+      "id": "4cb7f1fa-70f5-41f8-bbb3-081f3a5fdf15",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "QLnvyUHfmcKDPMyY",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/pintostudio~youtube-transcript-scraper/run-sync-get-dataset-items?token=apify_api_...",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "videoUrl",
+              "value": "={{ 'https://www.youtube.com/watch?v=' + $('Extract Video ID from URL').item.json.videoId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        5840,
+        1744
+      ],
+      "id": "edb9b968-a11d-4490-bb9d-2254d0600d26",
+      "name": "Get Video Details"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "transcript",
+              "value": "={{ $json.data.map(item => item.text).join(' ') }}",
+              "type": "string"
+            },
+            {
+              "id": "id-2",
+              "name": "videoTitle",
+              "value": "={{ $json.data[0].videoTitle || 'Video' }}",
+              "type": "string"
+            },
+            {
+              "id": "id-3",
+              "name": "videoId",
+              "value": "={{ $('Extract Video ID from URL').item.json.videoId }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "56e5cd15-c251-4603-927f-c49846eddaf7",
+      "name": "Prepare AI Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        6064,
+        1744
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Workflow Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Configuration": {
+      "main": [
+        [
+          {
+            "node": "Extract Video ID from URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Video ID from URL": {
+      "main": [
+        [
+          {
+            "node": "Get Video Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Chapter Generator Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chapter Generator Agent": {
+      "main": [
+        [
+          {
+            "node": "Format Chapter List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Chapter List": {
+      "main": [
+        [
+          {
+            "node": "Update Video Description",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Video Description": {
+      "main": [
+        [
+          {
+            "node": "Respond to Chat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Chapter Generator Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Video Details": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Input": {
+      "main": [
+        [
+          {
+            "node": "Chapter Generator Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "fbe98029-fc24-42e1-83bf-e19e23ce0a05",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ac54dbbad1137090370312954037beb22e9ce6a5abb0eea080a6f19163dbc989"
+  },
+  "id": "MnvLXqA2luMUei3x",
+  "tags": []
+}
